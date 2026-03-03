@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stream-backend"
+version = "0.1.0"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "sqlalchemy[asyncio]>=2.0.32",
+  "asyncpg>=0.29.0",
+  "alembic>=1.13.2",
+  "boto3>=1.35.0",
+  "python-multipart>=0.0.9",
+  "pydantic-settings>=2.4.0",
+]
+
+[tool.setuptools]
+packages = ["app"]
