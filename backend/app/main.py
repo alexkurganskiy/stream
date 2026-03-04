@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from botocore.exceptions import ClientError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,10 +85,18 @@ async def live_m3u8(db: AsyncSession = Depends(get_db)) -> Response:
         cache: PlaylistConfigCache = app.state.playlist_cache
         text = await build_live_m3u8(db, redis=redis, cache=cache)
 
+    if not text:
+        return Response(
+            content="live playlist is not ready\n",
+            media_type="text/plain",
+            status_code=503,
+            headers={"Cache-Control": "private, max-age=1, must-revalidate", "Retry-After": "2"},
+        )
+
     return Response(
         content=text,
         media_type="application/vnd.apple.mpegurl",
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        headers={"Cache-Control": "private, max-age=1, must-revalidate"},
     )
 
 
@@ -95,5 +104,12 @@ async def live_m3u8(db: AsyncSession = Depends(get_db)) -> Response:
 async def live_segment(video_id: int, segment_idx: int, v: int | None = None) -> Response:
     _ = v
     key = f"vod/{video_id}/seg_{segment_idx:05d}.ts"
-    body = s3_service.get_object(key)
-    return Response(content=body, media_type="video/mp2t", headers={"Cache-Control": "no-cache"})
+    try:
+        body = s3_service.get_object(key)
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        if error.get("Code") in {"NoSuchKey", "404"}:
+            logger.warning("live segment missing key=%s", key)
+            return Response(content="segment is not ready\n", media_type="text/plain", status_code=404)
+        raise
+    return Response(content=body, media_type="video/mp2t", headers={"Cache-Control": "public, max-age=31536000, immutable"})

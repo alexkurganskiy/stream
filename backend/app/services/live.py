@@ -12,6 +12,7 @@ from app.services.live_playlist import (
     PlaylistVideo,
     SEGMENT_LEN_SEC,
     WINDOW_SIZE,
+    build_playlist_config,
     render_live_m3u8,
     segment_pointer,
 )
@@ -48,16 +49,11 @@ class PlaylistConfigCache:
         videos = [
             PlaylistVideo(
                 id=video.id,
-                segments_count=max(video.segments_count, 1),
+                segments_count=video.segments_count,
             )
             for video in (await session.scalars(stmt)).all()
         ]
-
-        prefix = [0]
-        for video in videos:
-            prefix.append(prefix[-1] + video.segments_count)
-
-        config = PlaylistConfig(videos=videos, total_segments=prefix[-1] if videos else 0, prefix=prefix)
+        config = build_playlist_config(videos)
         self._config = config
         self._expires_at = now + self.ttl_sec
         return config
@@ -77,10 +73,12 @@ async def get_or_init_epoch0(redis: Redis) -> int:
     return int(stored) if stored is not None else now_ts
 
 
-async def build_live_m3u8(session: AsyncSession, redis: Redis, cache: PlaylistConfigCache, window_size: int = WINDOW_SIZE) -> str:
+async def build_live_m3u8(
+    session: AsyncSession, redis: Redis, cache: PlaylistConfigCache, window_size: int = WINDOW_SIZE
+) -> str | None:
     config = await cache.get(session)
     if not config.videos:
-        return "#EXTM3U\n#EXT-X-VERSION:3\n"
+        return None
 
     epoch0 = await get_or_init_epoch0(redis)
     now_ts = int(time.time())

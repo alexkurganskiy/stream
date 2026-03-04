@@ -73,9 +73,15 @@ async def transcode_hls(video_id: int, db: AsyncSession = Depends(get_db)) -> di
 
 @router.post("/playlist")
 async def set_playlist(payload: PlaylistUpdate, db: AsyncSession = Depends(get_db)) -> dict[str, str]:
-    rows = (await db.scalars(select(Video.id).where(Video.id.in_(payload.video_ids)))).all()
+    rows = (
+        await db.execute(
+            select(Video.id, Video.segments_count).where(Video.id.in_(payload.video_ids))
+        )
+    ).all()
     if len(rows) != len(payload.video_ids):
         raise HTTPException(status_code=400, detail="some video_ids do not exist")
+    if any(segments_count <= 0 for _, segments_count in rows):
+        raise HTTPException(status_code=400, detail="all playlist videos must be transcoded first")
 
     await db.execute(delete(PlaylistItem))
     for position, video_id in enumerate(payload.video_ids):

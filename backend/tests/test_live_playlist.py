@@ -1,6 +1,12 @@
 import unittest
 
-from app.services.live_playlist import PlaylistConfig, PlaylistVideo, render_live_m3u8, segment_pointer
+from app.services.live_playlist import (
+    PlaylistConfig,
+    PlaylistVideo,
+    build_playlist_config,
+    render_live_m3u8,
+    segment_pointer,
+)
 
 
 class LivePlaylistTests(unittest.TestCase):
@@ -23,8 +29,8 @@ class LivePlaylistTests(unittest.TestCase):
 
         first = render_live_m3u8(config, sequence=100)
         second = render_live_m3u8(config, sequence=101)
-        self.assertIn("#EXT-X-MEDIA-SEQUENCE:100", first)
-        self.assertIn("#EXT-X-MEDIA-SEQUENCE:101", second)
+        self.assertIn("#EXT-X-MEDIA-SEQUENCE:95", first)
+        self.assertIn("#EXT-X-MEDIA-SEQUENCE:96", second)
 
     def test_playlist_text_shape(self) -> None:
         config = PlaylistConfig(
@@ -36,6 +42,7 @@ class LivePlaylistTests(unittest.TestCase):
         text = render_live_m3u8(config, sequence=3)
         self.assertTrue(text.startswith("#EXTM3U\n"))
         self.assertIn("#EXT-X-TARGETDURATION:2", text)
+        self.assertIn("#EXT-X-MEDIA-SEQUENCE:0", text)
         self.assertIn("/live/ts/7/1?v=3", text)
 
 
@@ -61,6 +68,19 @@ class LivePlaylistTests(unittest.TestCase):
         text = render_live_m3u8(config, sequence=0, window_size=2)
         self.assertIn("#EXT-X-INDEPENDENT-SEGMENTS", text)
         self.assertIn("#EXT-X-DISCONTINUITY", text)
+
+    def test_build_playlist_config_skips_untranscoded_videos(self) -> None:
+        config = build_playlist_config(
+            [
+                PlaylistVideo(id=1, segments_count=0),
+                PlaylistVideo(id=2, segments_count=3),
+                PlaylistVideo(id=3, segments_count=-1),
+            ]
+        )
+
+        self.assertEqual([video.id for video in config.videos], [2])
+        self.assertEqual(config.total_segments, 3)
+        self.assertEqual(config.prefix, [0, 3])
 
 
 if __name__ == "__main__":

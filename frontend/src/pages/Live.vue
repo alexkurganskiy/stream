@@ -76,12 +76,14 @@ onMounted(() => {
 
   video.controls = false
 
-  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = LIVE_PLAYLIST_URL
+  if (Hls.isSupported()) {
+    setupHls(video)
     return
   }
 
-  setupHls(video)
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = LIVE_PLAYLIST_URL
+  }
 })
 
 onUnmounted(() => {
