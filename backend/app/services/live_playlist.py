@@ -35,15 +35,22 @@ def render_live_m3u8(config: PlaylistConfig, sequence: int, window_size: int = W
     lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
+        "#EXT-X-INDEPENDENT-SEGMENTS",
         f"#EXT-X-TARGETDURATION:{SEGMENT_LEN_SEC}",
         f"#EXT-X-MEDIA-SEQUENCE:{sequence}",
     ]
 
+    previous_video_id: int | None = None
     for idx in range(window_size):
         pointer = sequence + idx
         video_idx, segment_idx = segment_pointer(pointer, config)
         video = config.videos[video_idx]
+
+        if previous_video_id is not None and previous_video_id != video.id:
+            lines.append("#EXT-X-DISCONTINUITY")
+
         lines.append(f"#EXTINF:{SEGMENT_LEN_SEC},")
         lines.append(f"/live/ts/{video.id}/{segment_idx}?v={pointer}")
+        previous_video_id = video.id
 
     return "\n".join(lines) + "\n"

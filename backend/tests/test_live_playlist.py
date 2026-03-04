@@ -51,6 +51,17 @@ class LivePlaylistTests(unittest.TestCase):
         self.assertIn("/live/ts/9/0?v=0", first)
         self.assertIn("/live/ts/9/0?v=2", second)
 
+    def test_discontinuity_inserted_between_videos(self) -> None:
+        config = PlaylistConfig(
+            videos=[PlaylistVideo(id=1, segments_count=1), PlaylistVideo(id=2, segments_count=1)],
+            total_segments=2,
+            prefix=[0, 1, 2],
+        )
+
+        text = render_live_m3u8(config, sequence=0, window_size=2)
+        self.assertIn("#EXT-X-INDEPENDENT-SEGMENTS", text)
+        self.assertIn("#EXT-X-DISCONTINUITY", text)
+
 
 if __name__ == "__main__":
     unittest.main()

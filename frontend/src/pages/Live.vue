@@ -21,7 +21,7 @@
         </div>
         <div class="meta-item">
           <span class="meta-label">Mode</span>
-          <span>Low-latency HLS</span>
+          <span>Live HLS (stable polling)</span>
         </div>
       </div>
     </section>
@@ -78,7 +78,12 @@ onMounted(() => {
     return
   }
 
-  hls = new Hls({ lowLatencyMode: true })
+  hls = new Hls({
+    lowLatencyMode: false,
+    liveSyncDurationCount: 3,
+    liveMaxLatencyDurationCount: 8,
+    maxLiveSyncPlaybackRate: 1.1,
+  })
   hls.loadSource(LIVE_PLAYLIST_URL)
   hls.attachMedia(video)
 })

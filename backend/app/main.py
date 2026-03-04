@@ -16,6 +16,7 @@ from app.services.live import LIVE_M3U8_KEY, PlaylistConfigCache, build_live_m3u
 from app.services.s3 import s3_service
 
 settings = get_settings()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -56,10 +57,11 @@ async def request_time_logger(request: Request, call_next):
     response = await call_next(request)
     elapsed_ms = (time.perf_counter() - started) * 1000
     logger.info(
-        "request_at=%s method=%s path=%s status=%s duration_ms=%.1f",
+        "request_at=%s method=%s path=%s query=%s status=%s duration_ms=%.1f",
         datetime.now(timezone.utc).isoformat(),
         request.method,
         request.url.path,
+        request.url.query,
         response.status_code,
         elapsed_ms,
     )
