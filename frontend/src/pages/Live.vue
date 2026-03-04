@@ -45,8 +45,9 @@ const setupHls = (video: HTMLVideoElement) => {
     maxLiveSyncPlaybackRate: 1,
     backBufferLength: 30,
     manifestLoadingTimeOut: 20000,
-    manifestLoadingRetryDelay: 1000,
-    manifestLoadingMaxRetryTimeout: 8000,
+    manifestLoadingRetryDelay: 2000,
+    manifestLoadingMaxRetryTimeout: 12000,
+    manifestLoadingMaxRetry: 4,
   })
 
   hls.on(Hls.Events.ERROR, (_, data) => {
@@ -56,12 +57,6 @@ const setupHls = (video: HTMLVideoElement) => {
 
     if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
       hls.recoverMediaError()
-      return
-    }
-
-    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-      hls.stopLoad()
-      window.setTimeout(() => hls?.startLoad(), 1200)
       return
     }
 
