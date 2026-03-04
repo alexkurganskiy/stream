@@ -25,10 +25,3 @@ class PlaylistItem(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     video_id: Mapped[int] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-class StreamState(Base):
-    __tablename__ = "stream_state"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

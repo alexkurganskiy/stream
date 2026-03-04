@@ -1,81 +1,123 @@
-from dataclasses import dataclass
-from datetime import datetime, timezone
+import asyncio
+import logging
+import time
 
+from redis.asyncio import Redis
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.models import PlaylistItem, StreamState, Video
-from app.services.s3 import s3_service
+from app.models.models import PlaylistItem, Video
+from app.services.live_playlist import (
+    PlaylistConfig,
+    PlaylistVideo,
+    SEGMENT_LEN_SEC,
+    WINDOW_SIZE,
+    build_playlist_config,
+    render_live_m3u8,
+    segment_pointer,
+)
+
+logger = logging.getLogger(__name__)
+
+LIVE_EPOCH0_KEY = "live:epoch0"
+LIVE_SEQ_KEY = "live:seq"
+LIVE_M3U8_KEY = "live:m3u8"
+LIVE_LOCK_KEY = "live:lock"
+
+LOCK_TTL_SEC = 3
+M3U8_TTL_SEC = 5
+CONFIG_CACHE_TTL_SEC = 15
+LOG_EVERY_SEC = 20
 
 
-@dataclass
-class PlaylistVideo:
-    id: int
-    duration_sec: int
-    segment_len_sec: int
-    segments_count: int
+class PlaylistConfigCache:
+    def __init__(self, ttl_sec: int = CONFIG_CACHE_TTL_SEC) -> None:
+        self.ttl_sec = ttl_sec
+        self._config: PlaylistConfig | None = None
+        self._expires_at = 0.0
 
+    async def get(self, session: AsyncSession) -> PlaylistConfig:
+        now = time.monotonic()
+        if self._config is not None and now < self._expires_at:
+            return self._config
 
-async def build_live_m3u8(session: AsyncSession, window_size: int = 6) -> str:
-    stmt = (
-        select(Video)
-        .join(PlaylistItem, PlaylistItem.video_id == Video.id)
-        .order_by(PlaylistItem.position.asc())
-    )
-    videos = [
-        PlaylistVideo(
-            id=v.id,
-            duration_sec=max(v.duration_sec, 1),
-            segment_len_sec=max(v.segment_len_sec, 1),
-            segments_count=max(v.segments_count, 1),
+        stmt = (
+            select(Video)
+            .join(PlaylistItem, PlaylistItem.video_id == Video.id)
+            .order_by(PlaylistItem.position.asc())
         )
-        for v in (await session.scalars(stmt)).all()
-    ]
-    if not videos:
-        return "#EXTM3U\n#EXT-X-VERSION:3\n"
+        videos = [
+            PlaylistVideo(
+                id=video.id,
+                segments_count=video.segments_count,
+            )
+            for video in (await session.scalars(stmt)).all()
+        ]
+        config = build_playlist_config(videos)
+        self._config = config
+        self._expires_at = now + self.ttl_sec
+        return config
 
-    stream_state = await session.get(StreamState, 1)
-    if stream_state is None:
-        stream_state = StreamState(id=1, started_at=datetime.now(timezone.utc))
-        session.add(stream_state)
-        await session.commit()
-        await session.refresh(stream_state)
 
-    total_duration = sum(video.duration_sec for video in videos)
-    elapsed = (datetime.now(timezone.utc) - stream_state.started_at).total_seconds()
-    pos = int(elapsed % total_duration)
+async def get_or_init_epoch0(redis: Redis) -> int:
+    epoch0 = await redis.get(LIVE_EPOCH0_KEY)
+    if epoch0 is not None:
+        return int(epoch0)
 
-    video_idx = 0
-    local_pos = pos
-    for idx, video in enumerate(videos):
-        if local_pos < video.duration_sec:
-            video_idx = idx
-            break
-        local_pos -= video.duration_sec
+    now_ts = int(time.time())
+    was_set = await redis.set(LIVE_EPOCH0_KEY, now_ts, nx=True)
+    if was_set:
+        return now_ts
 
-    current_video = videos[video_idx]
-    current_segment = min(current_video.segments_count - 1, local_pos // current_video.segment_len_sec)
+    stored = await redis.get(LIVE_EPOCH0_KEY)
+    return int(stored) if stored is not None else now_ts
 
-    global_sequence = int(elapsed // current_video.segment_len_sec)
-    lines = [
-        "#EXTM3U",
-        "#EXT-X-VERSION:3",
-        f"#EXT-X-TARGETDURATION:{current_video.segment_len_sec}",
-        f"#EXT-X-MEDIA-SEQUENCE:{global_sequence}",
-    ]
 
-    idx = video_idx
-    seg = current_segment
-    for _ in range(window_size):
-        video = videos[idx]
-        key = f"vod/{video.id}/seg_{seg:05d}.ts"
-        url = s3_service.presign_get(key)
-        lines.append(f"#EXTINF:{video.segment_len_sec},")
-        lines.append(url)
+async def build_live_m3u8(
+    session: AsyncSession, redis: Redis, cache: PlaylistConfigCache, window_size: int = WINDOW_SIZE
+) -> str | None:
+    config = await cache.get(session)
+    if not config.videos:
+        return None
 
-        seg += 1
-        if seg >= video.segments_count:
-            idx = (idx + 1) % len(videos)
-            seg = 0
+    epoch0 = await get_or_init_epoch0(redis)
+    now_ts = int(time.time())
+    sequence = max((now_ts - epoch0) // SEGMENT_LEN_SEC, 0)
+    return render_live_m3u8(config=config, sequence=sequence, window_size=window_size)
 
-    return "\n".join(lines) + "\n"
+
+async def live_playlist_loop(session_factory: async_sessionmaker[AsyncSession], redis: Redis) -> None:
+    cache = PlaylistConfigCache()
+    worker_id = f"worker-{id(cache)}"
+    last_log_at = 0.0
+
+    while True:
+        try:
+            lock_acquired = await redis.set(LIVE_LOCK_KEY, worker_id, ex=LOCK_TTL_SEC, nx=True)
+            if not lock_acquired:
+                await asyncio.sleep(1)
+                continue
+
+            async with session_factory() as session:
+                config = await cache.get(session)
+
+            if config.videos:
+                epoch0 = await get_or_init_epoch0(redis)
+                now_ts = int(time.time())
+                sequence = max((now_ts - epoch0) // SEGMENT_LEN_SEC, 0)
+                playlist = render_live_m3u8(config=config, sequence=sequence, window_size=WINDOW_SIZE)
+                await redis.set(LIVE_SEQ_KEY, sequence)
+                await redis.set(LIVE_M3U8_KEY, playlist, ex=M3U8_TTL_SEC)
+
+                now_mono = time.monotonic()
+                if now_mono - last_log_at >= LOG_EVERY_SEC:
+                    first_video_idx, first_seg = segment_pointer(sequence, config)
+                    first_url = f"/live/ts/{config.videos[first_video_idx].id}/{first_seg}"
+                    logger.info("live playlist updated seq=%s first_url=%s", sequence, first_url)
+                    last_log_at = now_mono
+
+            await redis.expire(LIVE_LOCK_KEY, LOCK_TTL_SEC)
+        except Exception:
+            logger.exception("live playlist loop iteration failed")
+
+        await asyncio.sleep(1)

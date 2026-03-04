@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     s3_access_key: str = Field(alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(alias="S3_SECRET_KEY")
     s3_bucket: str = Field(alias="S3_BUCKET")
-    stream_t0: str = Field(default="2024-01-01T00:00:00Z", alias="STREAM_T0")
+    redis_url: str = Field(alias="REDIS_URL")
     cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
 
 
