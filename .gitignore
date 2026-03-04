@@ -1,0 +1,24 @@
+# Environment files
+.env
+backend/.env
+frontend/.env
+
+# Local storage and runtime data
+storage/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Frontend
+node_modules/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
