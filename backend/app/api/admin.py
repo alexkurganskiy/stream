@@ -1,14 +1,17 @@
-from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
+from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.models import PlaylistItem, StreamState, Video
+from app.dependencies import get_redis
+from app.models.models import PlaylistItem, Video
+from app.services.live import LIVE_EPOCH0_KEY, LIVE_M3U8_KEY, LIVE_SEQ_KEY
+from app.services.live_playlist import SEGMENT_LEN_SEC
 from app.services.s3 import s3_service
 from app.services.transcode import run_ffmpeg_to_hls
 
@@ -50,7 +53,7 @@ async def transcode_hls(video_id: int, db: AsyncSession = Depends(get_db)) -> di
         output_dir = temp_path / "hls"
 
         s3_service.download_file(f"vod/{video_id}/source.mp4", str(source_file))
-        duration = await run_ffmpeg_to_hls(source_file, output_dir, segment_len=4)
+        duration = await run_ffmpeg_to_hls(source_file, output_dir, segment_len=SEGMENT_LEN_SEC)
 
         index_path = output_dir / "index.m3u8"
         s3_service.put_object(f"vod/{video_id}/index.m3u8", index_path.read_bytes(), "application/vnd.apple.mpegurl")
@@ -60,7 +63,7 @@ async def transcode_hls(video_id: int, db: AsyncSession = Depends(get_db)) -> di
             s3_service.put_object(f"vod/{video_id}/{segment.name}", segment.read_bytes(), "video/mp2t")
 
     video.duration_sec = duration
-    video.segment_len_sec = 4
+    video.segment_len_sec = SEGMENT_LEN_SEC
     video.segments_count = len(segments)
     video.s3_prefix = f"vod/{video_id}/"
     await db.commit()
@@ -82,12 +85,8 @@ async def set_playlist(payload: PlaylistUpdate, db: AsyncSession = Depends(get_d
 
 
 @router.post("/stream/reset")
-async def reset_stream(db: AsyncSession = Depends(get_db)) -> dict[str, str]:
-    stream_state = await db.get(StreamState, 1)
-    if stream_state is None:
-        stream_state = StreamState(id=1, started_at=datetime.now(timezone.utc))
-        db.add(stream_state)
-    else:
-        stream_state.started_at = datetime.now(timezone.utc)
-    await db.commit()
+async def reset_stream(redis: Redis = Depends(get_redis)) -> dict[str, str]:
+    await redis.delete(LIVE_M3U8_KEY)
+    await redis.delete(LIVE_SEQ_KEY)
+    await redis.delete(LIVE_EPOCH0_KEY)
     return {"status": "ok"}
