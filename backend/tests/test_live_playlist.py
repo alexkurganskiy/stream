@@ -36,7 +36,20 @@ class LivePlaylistTests(unittest.TestCase):
         text = render_live_m3u8(config, sequence=3)
         self.assertTrue(text.startswith("#EXTM3U\n"))
         self.assertIn("#EXT-X-TARGETDURATION:2", text)
-        self.assertIn("/live/ts/7/1", text)
+        self.assertIn("/live/ts/7/1?v=3", text)
+
+
+    def test_segment_urls_are_unique_across_loops(self) -> None:
+        config = PlaylistConfig(
+            videos=[PlaylistVideo(id=9, segments_count=2)],
+            total_segments=2,
+            prefix=[0, 2],
+        )
+
+        first = render_live_m3u8(config, sequence=0)
+        second = render_live_m3u8(config, sequence=2)
+        self.assertIn("/live/ts/9/0?v=0", first)
+        self.assertIn("/live/ts/9/0?v=2", second)
 
 
 if __name__ == "__main__":

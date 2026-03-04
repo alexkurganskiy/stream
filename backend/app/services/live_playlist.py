@@ -44,6 +44,6 @@ def render_live_m3u8(config: PlaylistConfig, sequence: int, window_size: int = W
         video_idx, segment_idx = segment_pointer(pointer, config)
         video = config.videos[video_idx]
         lines.append(f"#EXTINF:{SEGMENT_LEN_SEC},")
-        lines.append(f"/live/ts/{video.id}/{segment_idx}")
+        lines.append(f"/live/ts/{video.id}/{segment_idx}?v={pointer}")
 
     return "\n".join(lines) + "\n"
