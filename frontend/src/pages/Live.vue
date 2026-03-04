@@ -11,7 +11,15 @@
       </div>
 
       <div class="player-shell">
-        <video ref="videoRef" autoplay muted playsinline class="player" />
+        <video
+          ref="videoRef"
+          autoplay
+          muted
+          controls
+          playsinline
+          controlslist="nodownload noplaybackrate"
+          class="player"
+        />
       </div>
 
       <div class="meta-row">
@@ -36,6 +44,31 @@ import { LIVE_PLAYLIST_URL } from '../api'
 const videoRef = ref<HTMLVideoElement | null>(null)
 const playlistUrl = LIVE_PLAYLIST_URL
 let hls: Hls | null = null
+const LIVE_EDGE_TOLERANCE_SEC = 2
+
+const getLiveEdge = (video: HTMLVideoElement) => {
+  if (video.seekable.length < 1) {
+    return null
+  }
+
+  return video.seekable.end(video.seekable.length - 1)
+}
+
+const keepAtLiveEdge = () => {
+  const video = videoRef.value
+  if (!video) {
+    return
+  }
+
+  const liveEdge = getLiveEdge(video)
+  if (liveEdge === null) {
+    return
+  }
+
+  if (video.currentTime < liveEdge - LIVE_EDGE_TOLERANCE_SEC) {
+    video.currentTime = liveEdge
+  }
+}
 
 const setupHls = (video: HTMLVideoElement) => {
   hls = new Hls({
@@ -74,7 +107,8 @@ onMounted(() => {
     return
   }
 
-  video.controls = false
+  video.addEventListener('seeking', keepAtLiveEdge)
+  video.addEventListener('loadedmetadata', keepAtLiveEdge)
 
   if (Hls.isSupported()) {
     setupHls(video)
@@ -87,6 +121,12 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  const video = videoRef.value
+  if (video) {
+    video.removeEventListener('seeking', keepAtLiveEdge)
+    video.removeEventListener('loadedmetadata', keepAtLiveEdge)
+  }
+
   hls?.destroy()
   hls = null
 })
@@ -170,6 +210,18 @@ h1 {
   width: 100%;
   max-height: 70vh;
   background: #02040a;
+}
+
+.player::-webkit-media-controls-timeline {
+  display: none;
+}
+
+.player::-webkit-media-controls-current-time-display {
+  display: none;
+}
+
+.player::-webkit-media-controls-time-remaining-display {
+  display: none;
 }
 
 .meta-row {
