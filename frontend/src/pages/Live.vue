@@ -36,30 +36,41 @@ import { LIVE_PLAYLIST_URL } from '../api'
 const videoRef = ref<HTMLVideoElement | null>(null)
 const playlistUrl = LIVE_PLAYLIST_URL
 let hls: Hls | null = null
-let lastTime = 0
 
-const lockSeeking = () => {
-  const video = videoRef.value
-  if (!video) {
-    return
-  }
-  if (video.currentTime < lastTime - 0.3) {
-    video.currentTime = lastTime
-  }
-}
+const setupHls = (video: HTMLVideoElement) => {
+  hls = new Hls({
+    lowLatencyMode: false,
+    liveSyncDurationCount: 4,
+    liveMaxLatencyDurationCount: 12,
+    maxLiveSyncPlaybackRate: 1,
+    backBufferLength: 30,
+    manifestLoadingTimeOut: 20000,
+    manifestLoadingRetryDelay: 1000,
+    manifestLoadingMaxRetryTimeout: 8000,
+  })
 
-const updateLast = () => {
-  const video = videoRef.value
-  if (!video) {
-    return
-  }
-  lastTime = video.currentTime
-}
+  hls.on(Hls.Events.ERROR, (_, data) => {
+    if (!hls || !data.fatal) {
+      return
+    }
 
-const blockKeys = (event: KeyboardEvent) => {
-  if (['ArrowLeft', 'ArrowRight', 'j', 'k', 'l', 'J', 'K', 'L'].includes(event.key)) {
-    event.preventDefault()
-  }
+    if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+      hls.recoverMediaError()
+      return
+    }
+
+    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+      hls.stopLoad()
+      window.setTimeout(() => hls?.startLoad(), 1200)
+      return
+    }
+
+    hls.destroy()
+    hls = null
+  })
+
+  hls.loadSource(LIVE_PLAYLIST_URL)
+  hls.attachMedia(video)
 }
 
 onMounted(() => {
@@ -69,31 +80,18 @@ onMounted(() => {
   }
 
   video.controls = false
-  video.addEventListener('seeking', lockSeeking)
-  video.addEventListener('timeupdate', updateLast)
-  window.addEventListener('keydown', blockKeys)
 
   if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = LIVE_PLAYLIST_URL
     return
   }
 
-  hls = new Hls({
-    lowLatencyMode: false,
-    liveSyncDurationCount: 3,
-    liveMaxLatencyDurationCount: 8,
-    maxLiveSyncPlaybackRate: 1.1,
-  })
-  hls.loadSource(LIVE_PLAYLIST_URL)
-  hls.attachMedia(video)
+  setupHls(video)
 })
 
 onUnmounted(() => {
-  const video = videoRef.value
-  video?.removeEventListener('seeking', lockSeeking)
-  video?.removeEventListener('timeupdate', updateLast)
-  window.removeEventListener('keydown', blockKeys)
   hls?.destroy()
+  hls = null
 })
 </script>
 
